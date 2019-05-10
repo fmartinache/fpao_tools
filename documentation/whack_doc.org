@@ -1,0 +1,229 @@
+#+TITLE: Documentation of the speckle whacking code
+#+AUTHOR: Frantz Martinache
+
+* introduction
+
+This code is a revisit of the speckle nulling tool originally developed for
+SCExAO and that was using a pygame GUI to interact with the user. It is based
+on a QT Gui that is multi-thread safe, thanks to input provided by E. Jeschke.
+
+The goal is to make a better version of the original code, hopefully a tad more
+efficient and optimized, but that remains somewhat legible and easy to
+understand. This is not the end-game, that is going to require super-fast (kHz
+frame rate) interaction with a camera and a DM. The closed-loop speckle probing
+and compensation may have to be delegated to an external (compiled) program,
+especially when we go to very fast frame rate.
+
+* start the simulation
+
+Start a simulation of SCExAO with a residual 50 nm RMS dynamic residual
+aberration. Add a static aberration with a recognizable "F" shape.
+
+In a python shell:
+
+#+BEGIN_SRC python
+  import xaosim as xs
+
+  instru = xs.instrument('SCExAO')
+  instru.start()
+  instru.atmo.update(correc=10, rms=50.0)
+
+  sz = instru.atmo.qstatic.shape[0]
+  instru.atmo.qstatic = 100.0 * xs.pupil.F_test_figure(sz, sz, 40)
+#+END_SRC
+
+- in a separate shell:
+#+BEGIN_SRC sh
+  python3 whack
+#+END_SRC
+
+The first set of commands initializes a simulation of SCExAO, replicating its
+shared memory data structure and their relashionships. In the simulation, the
+camera shared memory data structure is expected at /dev/shm/ircam.im.shm; the DM
+channel mirror to be modulated is /dev/shm/dmdisp4.im.shm
+
+The second set of commads starts the utility GUI that allows you to run the
+speckle control loop.
+
+* code content
+
+To help figure out what work remains to happen, I need to list the different
+functions available in the code.
+
+** whack
+*** original list of functions
+- arr2im(arr, vmin=False, vmax=False, pwr=1.0, cmap=None)
+- class GenericThread(QtCore.QThread)
+- class MyWindow(QtGui.QMainWindow)
+- closeEvent(self, event)
+- add_shape_2_DM(self, dmap)
+- set_shape_2_DM(self, dmap)
+- find_origin_call(self)
+- pix2spf_call(self)
+- amp_2_int_call(self)
+- amp_xy_evolution(self)
+- get_active_live(self)
+- find_pix2spf(self)
+- pos2spf(self, x, y)
+- find_origin(self)
+- coadd_acquisitions(self, nim, ave=True)
+- probe_ROI(self, kx=[0.35, 0.0], ky=[0.0, 0.35], spa=None, ref=None, nav=20)
+- amp2int(self)
+- probe_and_locate_speckles(self, ns=4, kx=[0.35, 0.0], ky=[0.0, 0.35], ref=None)
+- print_help(self)
+- load_dm_map(self)
+- save_dm_map(self)
+- tlock(self)
+- refresh_img(self)
+- refresh_dmc(self)
+- refresh_all(self)
+- log(self, message="", color="black", crt=True)
+- update_ROI(self)
+- erase_channel(self)
+- memorize_dmc(self)
+- memory_switch(self)
+- abort_now(self)
+- update_dark(self)
+- close_loop_call(self)
+- close_loop(self)
+- iteration(self, delay=0.1)
+- updt_target_props(self, initialize=False)
+- updt_target_list(self, myimg)
+
+*** reshuffled list of functions
+**** objects
+- class GenericThread(QtCore.QThread)
+- class MyWindow(QtGui.QMainWindow)
+- closeEvent(self, event)
+
+**** GUI tools
+- arr2im(arr, vmin=False, vmax=False, pwr=1.0, cmap=None)
+- abort_now(self)
+- update_dark(self)
+- refresh_img(self)
+- refresh_dmc(self)
+- refresh_all(self)
+- log(self, message="", color="black", crt=True)
+- print_help(self)
+
+**** DM interaction
+- load_dm_map(self)
+- save_dm_map(self)
+- add_shape_2_DM(self, dmap)
+- set_shape_2_DM(self, dmap)
+- erase_channel(self)
+- memorize_dmc(self)
+- memory_switch(self)
+
+**** delegating calls
+- find_origin_call(self)
+- pix2spf_call(self)
+- amp_2_int_call(self)
+- close_loop_call(self)
+
+**** high-level functions
+- find_pix2spf(self)
+- amp_xy_evolution(self)
+- find_origin(self)
+- probe_ROI(self, kx=[0.35, 0.0], ky=[0.0, 0.35], spa=None, ref=None, nav=20)
+- probe_and_locate_speckles(self, ns=4, kx=[0.35, 0.0], ky=[0.0, 0.35],
+  ref=None)
+
+**** lower-level tools
+- pos2spf(self, x, y)
+- coadd_acquisitions(self, nim, ave=True)
+- amp2int(self)
+- get_active_live(self)
+- update_ROI(self)
+- close_loop(self)
+- iteration(self, delay=0.1)
+- updt_target_props(self, initialize=False)
+- updt_target_list(self, myimg)
+- tlock(self)
+  
+* tests
+
+** modulation amplitude to speckle intensity: \alpha
+
+I = \beta * amp**2
+Contrast calib: amp=0.02, c0=0.0247, I0=27.46
+Contrast calib: amp=0.01, c0=0.0062, I0=6.87
+
+- amp: theoretical amplitude of the sinusoidal wave (in microns)
+- c0: theoretical speckle contrast for this amplitude
+- I0: observed speckle intensity
+
+Can verify with these that I0 is indeed prop to c0... at least, with my
+simulation!  With this implementation and the current settings, I ~= 1100 *
+(4*pi*amp/lambda)**2, with the amplitude and the wavelength both expressed in
+microns.
+
+In practice, this coefficient \alpha must be re-determined every time the
+exposure time on the camera is updated, or equivalently, if the luminosity of
+the target changes.
+
+One more calibration would be nice to do: repeat this measurement for several
+spatial frequencies. With a real DM, the coupling between actuators will (I
+naively assume) tend to reduce the effective modulation of the amplitude, which
+will manifest in a reduced speckle brightness. This isn't a problem, but
+something that should be taken into account to probe more efficiently the focal
+plane.
+
+For my simulation, this isn't going to reveal anything (unless I include an
+influence function model in the instrument simulation itself), so I'll leave
+that to later, when I test this new software on SCExAO. For now (July 1, 2017),
+I will focus on getting the speckle loop to actually work again.
+
+** speckle nulling!
+
+*** sequence of things that need to happen
+
+- identify speckles in a given ROI
+- measure their brightness and estimate the corresponding speckle amplitude
+- for that speckle amplitude, modulate the phase
+- solve for the actual speckle phase
+- apply the correction with a pre-selected gain
+
+*** tools to write or rewrite
+
+- locate_speckles()
+- follow_speckle_brightness = f(spx, spy, cube3D)
+
+*** July 3, 2017
+
+Some progress! I have ran a few iterations and it seems the software is able to
+sense the speckles and apply the appropriate correction.
+
+The intensity of a phase-induced speckle is proportional to the square of the
+amplitude of the DM modulation. With the notations I have used in the code:
+
+I = \beta * amp**2
+
+Let it be a speckle in the field of unknown complex amplitude a0*exp(1j*phi0).
+Its amplitude can be first guessed from its intensity, using the inverse
+relation:
+
+a0 = sqrt(I0 / \beta)
+
+To probe this speckle, one uses the DM to add, at the same spatial frequency,
+another speckle of comparable amplitude a*exp(1j*phi): the intensity of this
+local sum of speckles is:
+
+I = \beta || a*exp(1j*phi) + a0*exp(1j*phi0) ||**2
+I = \beta (a**2 + a0**2 + 2*a*a0*cos(phi-phi0))
+
+This intensity is measured for at least four values of phi, covering the 0-2pi
+range. The mean of these values, is:
+
+I_mean = \beta (a**2 + a0**2)
+
+The ratio: I/I_mean then writes as:
+
+I/I_mean = 1 + \frac{2*a*a_0}{a^2 + a_0^2} \¢os{\phi-\phi_0}
+
+Let us call \gamma = \frac{2*a*a_0}{a^2 + a_0^2}
+
+\gamma can be estimated by calculating the module of the normalized dot product
+between I/I_mean and a test exponential exp(1j*phi).
+
+        gamma = 2 * np.abs(test) / self.nsamp / inten_arr.mean()
