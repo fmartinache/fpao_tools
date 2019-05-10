@@ -88,7 +88,7 @@ else:
     pscale = 16.7
     wvl = 1.6
     from xaosim.scexao_shmlib import shm
-    cam  = shm('/tmp/ircam0_clean.im.shm', verbose=False)
+    cam  = shm('/tmp/ircam1_clean.im.shm', verbose=False)
     dmc  = shm('/tmp/dm00disp06.im.shm',  verbose=False)
     dmcc = shm('/tmp/dm00disp07.im.shm',  verbose=False)
     # ----------------------------------------------------------------------
