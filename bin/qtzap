@@ -68,8 +68,8 @@ else:
     # ----------------------------------------------------------------------
     pscale = 16.7
     from xaosim.scexao_shmlib import shm
-    cam = shm('/tmp/ircam1.im.shm',      verbose=False)
-    drk = shm('/tmp/ircam1_dark.im.shm', verbose=False)
+    cam = shm('/tmp/ircam0.im.shm',      verbose=False)
+    drk = shm('/tmp/ircam0_dark.im.shm', verbose=False)
     dmc = shm('/tmp/dm00disp04.im.shm',  verbose=False)
     # ----------------------------------------------------------------------
 
@@ -753,8 +753,8 @@ Don't you just love it when a plan comes together?
             self.etime = cam_get_etime()
         if not simulation:
             bname = home+"/conf/chuckcam_aux/bias%07d.fits" % (self.etime,)
-            self.bias = pf.getdata(bname).astype('float32')
-            #self.bias = drk.get_data(False, True)
+            #self.bias = pf.getdata(bname).astype('float32')
+            self.bias = drk.get_data(False, True)
         else:
             self.bias = np.zeros((ysz, xsz)).astype('float32')
         self.log("Updated dark", "blue")

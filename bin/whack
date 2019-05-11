@@ -88,7 +88,8 @@ else:
     pscale = 16.7
     wvl = 1.6
     from xaosim.scexao_shmlib import shm
-    cam  = shm('/tmp/ircam1_clean.im.shm', verbose=False)
+    cam  = shm('/tmp/ircam0.im.shm', verbose=False)
+    drk  = shm('/tmp/ircam0_dark.im.shm', verbose=False)
     dmc  = shm('/tmp/dm00disp06.im.shm',  verbose=False)
     dmcc = shm('/tmp/dm00disp07.im.shm',  verbose=False)
     # ----------------------------------------------------------------------
@@ -227,14 +228,17 @@ class MyWindow(QtGui.QMainWindow):
         #        prepare the 3 image displays
         # ==============================================
         self.update_ROI()
-        
         # --- camera image ---
         self.gView_ROI.hideAxis('left')
         self.gView_ROI.hideAxis('bottom')
 
+        self.bias = np.zeros((ysz,xsz))
+        if not simulation:
+            self.bias = drk.get_data()
+
         self.imv_img = pg.ImageItem()
         self.gView_ROI.addItem(self.imv_img)
-        self.data_img = cam.get_data(False, True) #- self.bias
+        self.data_img = cam.get_data(False, True) - self.bias
         self.data_roi = (self.data_img * self.ROI)[dysz:dysz+sz,dxsz:dxsz+sz]
         self.refresh_img()
 
@@ -412,7 +416,8 @@ class MyWindow(QtGui.QMainWindow):
 
     # =========================================================
     def get_active_live(self):
-        data = (cam.get_data(self.live_counter, True) * self.ROI)[dysz:dysz+sz,dxsz:dxsz+sz]
+        temp = cam.get_data(self.live_counter, True) - self.bias
+        data = (temp * self.ROI)[dysz:dysz+sz,dxsz:dxsz+sz]
         self.live_counter = cam.get_counter()
         return(data)
 
@@ -576,6 +581,11 @@ class MyWindow(QtGui.QMainWindow):
         global myqt
         nav = 5
 
+        # good time to update the dark if it has changed!
+        # -----------------------------------------------
+        if not simulation:
+            self.bias = drk.get_data()
+
         #    figure out where to put the speckle
         # ------------------------------------------
         orie = str(myqt.gui_call(self.cmB_ROI_orientation.currentText,)).lower()
@@ -709,7 +719,7 @@ class MyWindow(QtGui.QMainWindow):
         global index
 
         # ---  the camera image  ---
-        self.data_img = cam.get_data(False, True) #- self.bias
+        self.data_img = cam.get_data(False, True) - self.bias
         self.data_roi = (self.data_img * self.ROI)[dysz:dysz+sz,dxsz:dxsz+sz]
         self.refresh_img()
 
