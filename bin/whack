@@ -1,6 +1,14 @@
 #!/usr/bin/env python
 
 '''--------------------------------------------------------------------------
+20190515:
+--------
+Software was refreshed once more after last update of the shared memory data
+structure, repackaged as a python3 package and deployed on scexao-rtc (requiring
+piping of the images from scexao2 -> scexao-rtc). The solver was updated to
+provide an unambiguous measurement of the speckle amplitude (doing a fit to
+speckle instensity instead of the visibility).
+
 20180623:
 --------
 Software was requalified on SCExAO. Seems to work rather well and converges
@@ -89,7 +97,11 @@ else:
     wvl = 1.6
     from xaosim.scexao_shmlib import shm
     cam  = shm('/tmp/ircam0.im.shm', verbose=False)
-    drk  = shm('/tmp/ircam0_dark.im.shm', verbose=False)
+    try:
+        drk  = shm('/tmp/ircam0_dark.im.shm', verbose=False)
+    except:
+        drk = shm('/tmp/ircam0_dark.im.shm', np.zeros((ysz,xsz)), verbose=False)
+            
     dmc  = shm('/tmp/dm00disp06.im.shm',  verbose=False)
     dmcc = shm('/tmp/dm00disp07.im.shm',  verbose=False)
     # ----------------------------------------------------------------------
@@ -234,7 +246,10 @@ class MyWindow(QtGui.QMainWindow):
 
         self.bias = np.zeros((ysz,xsz))
         if not simulation:
-            self.bias = drk.get_data()
+            try:
+                self.bias = drk.get_data()
+            except:
+                pass
 
         self.imv_img = pg.ImageItem()
         self.gView_ROI.addItem(self.imv_img)
@@ -417,7 +432,8 @@ class MyWindow(QtGui.QMainWindow):
     # =========================================================
     def get_active_live(self):
         temp = cam.get_data(self.live_counter, True) - self.bias
-        data = (temp * self.ROI)[dysz:dysz+sz,dxsz:dxsz+sz]
+        #data = (temp * self.ROI)[dysz:dysz+sz,dxsz:dxsz+sz]
+        data = temp[dysz:dysz+sz,dxsz:dxsz+sz]
         self.live_counter = cam.get_counter()
         return(data)
 
@@ -472,6 +488,7 @@ class MyWindow(QtGui.QMainWindow):
         self.log("PIX2SPF matrix saved", "blue")
         # reset orientation to what it was before?
         myqt.gui_call(self.cmB_ROI_orientation.setCurrentIndex, memo)
+        self.update_ROI()
 
     # =========================================================
     def pos2spf(self, x, y):
@@ -484,7 +501,7 @@ class MyWindow(QtGui.QMainWindow):
         Converts speckle intensity to DM modulation amplitude
         using the model I = \beta * amp**2
         ------------------------------------------------- '''
-        return(np.sqrt(spi / self.beta * 1.05))
+        return(np.sqrt(spi / self.beta))# * 1.05))
 
     # =========================================================
     def find_origin(self):
@@ -563,7 +580,7 @@ class MyWindow(QtGui.QMainWindow):
             time.sleep(0.01)
 
             myim = self.coadd_acquisitions(nav, True)
-            res[ii] = myim - ref0
+            res[ii] = (myim - ref0) * self.iROI
 
         dmc.set_data(erase_map)
         return(res)
@@ -857,14 +874,14 @@ class MyWindow(QtGui.QMainWindow):
         ref0    = self.coadd_acquisitions(nav, True)               # ref. image
 
         #pf.writeto(conf_dir+'reference.fits', ref0, overwrite=True)
-        (spx, spy, spi) = locate_speckles(ref0, self.nspk, nbit=0) # find them
+        (spx, spy, spi) = locate_speckles(ref0 * self.iROI, self.nspk, nbit=0) # find them
 
         stats   = [] # empty list for correction amplitudes
         
         (skx, sky) = self.pos2spf(spx, spy)
         skx = np.array(skx)[0]
         sky = np.array(sky)[0]
-        spa = self.spi2amp(spi)
+        spa = self.spi2amp(spi) / 2
 
         #utcnow = time.strftime("%Y-%m-%d-%H:%M:%S", time.gmtime())
         #self.logfile.write("%s - %s\n" % (utcnow, myinfo))
@@ -877,7 +894,7 @@ class MyWindow(QtGui.QMainWindow):
         for ii in range(self.nspk):
             inten = track_speckle_intensity(probe_cube, spx[ii], spy[ii])
             self.plot_curve(inten[0])
-            (spk_amp, spk_phi) = self.CA_solver(inten, spa[ii])
+            (spk_amp, spk_phi) = self.CA_solver(inten, spi[ii], spa[ii])
             shape += spk_amp * np.sin(2*np.pi*(skx[ii]*xdm+sky[ii]*ydm) +
                                       spk_phi + np.pi)
 
@@ -898,7 +915,34 @@ class MyWindow(QtGui.QMainWindow):
         # self.updt_target_list(ref0)
     
     # =========================================================
-    def CA_solver(self, inten_arr, mod_amp):
+    def CA_solver(self, inten_arr, i0, mod_amp):
+        ''' -----------------------------------------------------
+        Solver for the complex amplitude of a speckle after it
+        has been probed with the DM.
+
+        parameters:
+        ----------
+        - inten_arr: the array of measured speckle intensity
+        - i0:        the initial speckle intensity
+
+        - mod_amp: the amplitude of the modulation
+        ----------------------------------------------------- '''
+        
+        test    = np.dot(inten_arr, self.test_CA)
+        spk_phi = np.angle(test) # speckle phase
+
+        bb = (inten_arr - i0) / (2 * self.beta * mod_amp) - mod_amp/2
+        cc = np.cos(self.dephase - spk_phi)
+        
+        spk_amp = cc.dot(bb[0]) / cc.dot(cc)
+                
+        if np.isnan(spk_amp): # just a safe-guard
+            spk_amp = 0.0
+
+        return((spk_amp, spk_phi))
+
+    # =========================================================
+    def CA_solver0(self, inten_arr, mod_amp):
         ''' -----------------------------------------------------
         Solver for the complex amplitude of a speckle after it
         has been probed with the DM.
